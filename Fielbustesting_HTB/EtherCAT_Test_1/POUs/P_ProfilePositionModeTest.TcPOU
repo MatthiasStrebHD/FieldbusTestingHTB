@@ -219,7 +219,9 @@ IF bTestRelativePositioning THEN
 	//positioning option code : 2#0010
 	//Positioning moves shall be performed relative to the position
 	//actual value (16#6064)
-END_IF]]></ST>
+END_IF
+
+//test]]></ST>
     </Implementation>
     <Method Name="TestChangeOfSetpoints" Id="{15b5872a-9abe-416f-a38b-72ef3f958d08}">
       <Declaration><![CDATA[METHOD TestChangeOfSetpoints : BOOL
@@ -333,6 +335,8 @@ END_IF]]></ST>
       <LineId Id="679" Count="0" />
       <LineId Id="662" Count="7" />
       <LineId Id="658" Count="0" />
+      <LineId Id="754" Count="0" />
+      <LineId Id="753" Count="0" />
     </LineIds>
     <LineIds Name="P_ProfilePositionModeTest.TestChangeOfSetpoints">
       <LineId Id="6" Count="7" />
