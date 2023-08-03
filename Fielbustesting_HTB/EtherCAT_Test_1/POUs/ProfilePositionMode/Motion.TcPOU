@@ -1,0 +1,254 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.11">
+  <POU Name="Motion" Id="{d45371c6-938a-4a66-97f1-3b6cd1f92e8a}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK Motion
+VAR_INPUT
+	sNetID					: T_AmsNetId;
+	nSlaveAddr				: UINT;
+	nTargetPosition			: DINT;
+END_VAR
+VAR_OUTPUT
+	bSuccess				: BOOL;
+	bSetpointSet			: BOOL;
+	bStartPositioning		: BOOL;
+END_VAR
+VAR_IN_OUT
+//	aControlStatusWords		: ARRAY[1..2] OF INT; 			//0x6040 (Controlword), 0x6041 (Statusword)  
+//	bTargetPosition			: BOOL;							//0x607A (Target Position)
+	bMove					: BOOL;
+END_VAR
+VAR
+	eMotionState			: (WAIT_FOR_TRIGGER, ENABLE_DEVICE, SET_SETPOINT, VALIDATE_SETPOINT, ACKNOWLEDGE_SET_POINT, WAIT_FOR_NEW_SETPOINT);
+	fbEnableDevice			: FB_EnableDevice;
+	fbSetSetpoint			: FB_EcCoeSdoWrite;
+	fbGetStatusword			: FB_EcCoeSdoRead;
+	tWait					: TON;
+	tWait2					: TON;
+	rTrig					: R_TRIG;
+	nStatusword				: UINT;
+	bGetStatusword			: BOOL;
+	bExecuteWait			: BOOL;
+	bSetSetpoint			: BOOL;
+	nSetPointBuf			: DINT;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[CASE eMotionState OF
+	WAIT_FOR_TRIGGER:
+		MAIN.Controlword := 0;
+		bStartPositioning := FALSE;
+		IF bMove THEN
+			bSetpointSet := TRUE;
+			bSuccess := TRUE;
+			ADSLOGSTR(msgCtrlMask := ADSLOG_MSGTYPE_HINT,
+				msgFmtStr := 'Enable Device',
+				strArg := '');
+			eMotionState := ENABLE_DEVICE;
+		END_IF	
+
+	ENABLE_DEVICE:
+		fbEnableDevice (bTrigger := bMove,
+						bSuccess => bSuccess,
+						sNetId := sNetId,
+						nSlaveAddr := nSlaveAddr);
+		IF fbEnableDevice.bFinished THEN
+			IF NOT bSuccess THEN
+//				aControlStatusWords[1] := 0;
+//				aControlStatusWords[2] := 0;
+				ADSLOGSTR(msgCtrlMask := ADSLOG_MSGTYPE_HINT,
+					msgFmtStr := 'Device not successfully enabled',
+					strArg := '');
+				eMotionState := WAIT_FOR_TRIGGER;
+			ELSE
+				ADSLOGSTR(msgCtrlMask := ADSLOG_MSGTYPE_HINT,
+					msgFmtStr := 'Device successfully enabled',
+					strArg := '');
+				eMotionState := SET_SETPOINT;
+			END_IF
+		END_IF
+		
+	WAIT_FOR_NEW_SETPOINT:
+		IF nTargetPosition <> nSetPointBuf THEN
+			ADSLOGSTR(msgCtrlMask := ADSLOG_MSGTYPE_HINT,
+				msgFmtStr := 'Set Setpoint',
+				strArg := '');
+				bStartPositioning := FALSE;
+			eMotionState := SET_SETPOINT;
+		END_IF
+		
+	SET_SETPOINT:
+		bSetpointSet	:= TRUE;
+		nSetPointBuf := nTargetPosition;
+		fbSetSetpoint(sNetId := sNetID,
+					nSlaveAddr := nSlaveAddr,
+					nSubIndex := 0,
+					nIndex := 16#607A,
+					pSrcBuf := ADR(nTargetPosition),
+					cbBufLen := SIZEOF(nTargetPosition),
+					bExecute := bSetSetpoint);
+		bSetSetpoint := TRUE;
+		MAIN.TargetPosition := nTargetPosition;
+		tWait(IN := bExecuteWait,
+				PT := T#175MS); 
+		bExecuteWait := TRUE;
+		IF tWait.Q THEN
+			bExecuteWait := FALSE;
+			IF fbSetSetpoint.bError THEN
+				//Error when setting Target Position
+				bSuccess := FALSE;
+				bSetSetpoint := FALSE;
+				eMotionState := WAIT_FOR_TRIGGER;
+			ELSE
+				ADSLOGSTR(msgCtrlMask := ADSLOG_MSGTYPE_HINT,
+					msgFmtStr := 'Validate Setpoint',
+					strArg := '');
+				eMotionState := VALIDATE_SETPOINT;
+			END_IF
+		END_IF
+ 
+	VALIDATE_SETPOINT:
+		bExecuteWait := TRUE;
+		MAIN.Controlword.4 := 1;
+		fbGetStatusword(sNetId := sNetId,
+			nSlaveAddr := nSlaveAddr,
+			nIndex := 16#6041,
+			nSubIndex := 0,
+			pDstBuf := ADR(nStatusword),
+			cbBufLen := SIZEOF(nStatusword),
+			bExecute := bGetStatusword);
+		IF tWait.Q THEN
+			bExecuteWait := FALSE;
+			tWait2(IN := bGetStatusword,
+				PT := T#250MS);
+			bGetStatusword := TRUE;
+			IF tWait2.Q THEN
+				bGetStatusword := FALSE;
+				IF nStatusword.12 THEN
+					eMotionState := ACKNOWLEDGE_SET_POINT;
+				ELSE 
+					bSetSetpoint := FALSE;
+					bSuccess := FALSE;
+//					aControlStatusWords[1] := 0;
+//					aControlStatusWords[2] := 0;
+					ADSLOGSTR(msgCtrlMask := ADSLOG_MSGTYPE_HINT,
+						msgFmtStr := 'Error when validating setpoint',
+						strArg := '');
+					eMotionState := WAIT_FOR_TRIGGER;
+				END_IF
+			END_IF
+		END_IF
+		
+	ACKNOWLEDGE_SET_POINT:
+		ADSLOGSTR(msgCtrlMask := ADSLOG_MSGTYPE_HINT,
+			msgFmtStr := 'Acknowledge Setpoint',
+			strArg := '');
+		bGetStatusword := TRUE;
+		IF tWait2.Q AND nStatusword.12 THEN
+			bStartPositioning := TRUE;
+			bGetStatusword := FALSE;
+			//Set point acknowledge is set back
+			MAIN.Controlword.4 := 0;
+			ADSLOGSTR(msgCtrlMask := ADSLOG_MSGTYPE_HINT,
+				msgFmtStr := 'Wait for new Setpoint',
+				strArg := '');
+			eMotionState := WAIT_FOR_NEW_SETPOINT;
+		ELSE
+			//TODO FAULT
+			eMotionState := WAIT_FOR_TRIGGER;
+		END_IF
+END_CASE]]></ST>
+    </Implementation>
+    <LineIds Name="Motion">
+      <LineId Id="48" Count="0" />
+      <LineId Id="74" Count="0" />
+      <LineId Id="238" Count="0" />
+      <LineId Id="396" Count="0" />
+      <LineId Id="76" Count="0" />
+      <LineId Id="198" Count="0" />
+      <LineId Id="78" Count="0" />
+      <LineId Id="328" Count="0" />
+      <LineId Id="330" Count="1" />
+      <LineId Id="80" Count="0" />
+      <LineId Id="79" Count="0" />
+      <LineId Id="75" Count="0" />
+      <LineId Id="49" Count="0" />
+      <LineId Id="57" Count="0" />
+      <LineId Id="69" Count="0" />
+      <LineId Id="167" Count="0" />
+      <LineId Id="171" Count="0" />
+      <LineId Id="325" Count="0" />
+      <LineId Id="67" Count="0" />
+      <LineId Id="175" Count="1" />
+      <LineId Id="337" Count="1" />
+      <LineId Id="336" Count="0" />
+      <LineId Id="70" Count="0" />
+      <LineId Id="72" Count="0" />
+      <LineId Id="340" Count="1" />
+      <LineId Id="339" Count="0" />
+      <LineId Id="73" Count="0" />
+      <LineId Id="71" Count="0" />
+      <LineId Id="66" Count="0" />
+      <LineId Id="132" Count="2" />
+      <LineId Id="358" Count="1" />
+      <LineId Id="357" Count="0" />
+      <LineId Id="398" Count="0" />
+      <LineId Id="137" Count="1" />
+      <LineId Id="64" Count="0" />
+      <LineId Id="52" Count="0" />
+      <LineId Id="199" Count="0" />
+      <LineId Id="139" Count="0" />
+      <LineId Id="99" Count="0" />
+      <LineId Id="86" Count="2" />
+      <LineId Id="91" Count="2" />
+      <LineId Id="53" Count="0" />
+      <LineId Id="283" Count="0" />
+      <LineId Id="179" Count="1" />
+      <LineId Id="178" Count="0" />
+      <LineId Id="182" Count="0" />
+      <LineId Id="193" Count="0" />
+      <LineId Id="183" Count="0" />
+      <LineId Id="188" Count="0" />
+      <LineId Id="185" Count="0" />
+      <LineId Id="187" Count="0" />
+      <LineId Id="190" Count="1" />
+      <LineId Id="361" Count="1" />
+      <LineId Id="360" Count="0" />
+      <LineId Id="192" Count="0" />
+      <LineId Id="186" Count="0" />
+      <LineId Id="184" Count="0" />
+      <LineId Id="108" Count="1" />
+      <LineId Id="181" Count="0" />
+      <LineId Id="112" Count="0" />
+      <LineId Id="201" Count="0" />
+      <LineId Id="208" Count="5" />
+      <LineId Id="215" Count="1" />
+      <LineId Id="241" Count="1" />
+      <LineId Id="221" Count="0" />
+      <LineId Id="223" Count="0" />
+      <LineId Id="228" Count="0" />
+      <LineId Id="224" Count="0" />
+      <LineId Id="226" Count="0" />
+      <LineId Id="230" Count="0" />
+      <LineId Id="233" Count="3" />
+      <LineId Id="364" Count="1" />
+      <LineId Id="363" Count="0" />
+      <LineId Id="231" Count="0" />
+      <LineId Id="227" Count="0" />
+      <LineId Id="225" Count="0" />
+      <LineId Id="217" Count="0" />
+      <LineId Id="202" Count="0" />
+      <LineId Id="9" Count="0" />
+      <LineId Id="352" Count="1" />
+      <LineId Id="351" Count="0" />
+      <LineId Id="245" Count="1" />
+      <LineId Id="395" Count="0" />
+      <LineId Id="247" Count="0" />
+      <LineId Id="285" Count="0" />
+      <LineId Id="249" Count="0" />
+      <LineId Id="355" Count="1" />
+      <LineId Id="354" Count="0" />
+      <LineId Id="250" Count="3" />
+      <LineId Id="248" Count="0" />
+      <LineId Id="19" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

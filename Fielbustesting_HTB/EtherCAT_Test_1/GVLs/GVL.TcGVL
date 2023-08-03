@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.11">
+  <GVL Name="GVL" Id="{03894085-25e2-4207-96ab-602d7bd3dadd}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+VAR_GLOBAL
+	sNetId				: T_AmsNetId := '5.109.65.175.2.1';
+	nSlaveAddr			: UINT := 1004;
+	
+	Controlword AT%Q*		: UINT;	
+	Statusword AT%I*		: UINT;
+END_VAR]]></Declaration>
+  </GVL>
+</TcPlcObject>

@@ -1,0 +1,232 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.11">
+  <POU Name="StartUpTests" Id="{5c2c3321-b140-4518-a103-c3096216c8a3}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM StartUpTests
+VAR CONSTANT
+	stPlcErrorInit			: ST_PlcErrorStartUp := (bPlcError := FALSE, bErrorCode := [0,0,0,0]);
+END_VAR
+
+VAR
+	eStartUpState 			: (WAIT_FOR_TRIGGER, TEST_SWITCH_ON_DISABLED, 
+								SET_MODE_OF_OPERATION, TEST_MODE_OF_OPERATION, GET_TEMPERATURE, CHECK_PLC_ERROR);
+	fbSetModeOfOperation	: FB_EcCoeSdoWrite;
+	fbGetModeOfOperation	: FB_EcCoeSdoRead;
+	fbGetDriveTemperature	: FB_EcCoeSdoRead;
+	fbGetMotorTemperature	: FB_EcCoeSdoRead;
+	stPlcError				: ST_PlcErrorStartUp;
+	tTimeout				: TON;
+	tWait1					: TON;
+	tWait2					: TON;
+	tWait					: TON;
+	counter					: INT := -1;
+	modeOfOperation			: INT;
+	bExecuteChangeMOP		: BOOL;	
+	bTestChangeMOP			: BOOL;
+END_VAR
+VAR_IN_OUT
+	bTrigger				: BOOL;
+	aTemperatureObjects		: ARRAY[1..2] OF INT;
+	aMOPObjects				: ARRAY[1..2] OF INT;
+	aControlStatusWords		: ARRAY[1..2] OF INT;
+END_VAR
+VAR_OUTPUT
+	bSwitchOnDisabled		: BOOL;
+	bChangeModeOfOperation	: BOOL := TRUE;
+	bFinished				: BOOL;
+	nDriveTemperature		: INT;
+	nMotorTemperature		: INT;
+END_VAR
+VAR_INPUT
+	sNetID					: T_AmsNetId;
+	nSlaveAddr				: UINT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[CASE eStartUpState OF
+	WAIT_FOR_TRIGGER:
+		IF bTrigger THEN
+			bTrigger := FALSE;
+			tTimeout.IN := FALSE;
+			bSwitchOnDisabled := FALSE;
+			bChangeModeOfOperation := FALSE;
+			bFinished := FALSE;
+			counter := 1;
+			stPlcError := stPlcErrorInit;
+			eStartUpState := TEST_SWITCH_ON_DISABLED;
+		END_IF
+	
+	TEST_SWITCH_ON_DISABLED:
+		tTimeout(IN := TRUE,
+			PT := T#1000MS);
+		IF MAIN.Statusword.6 THEN
+			bSwitchOnDisabled := TRUE;
+			eStartUpState := SET_MODE_OF_OPERATION;
+		ELSIF tTimeout.Q THEN
+			bSwitchOnDisabled := FALSE;
+			aControlStatusWords[1] := 0;
+			eStartUpState := SET_MODE_OF_OPERATION;
+		END_IF
+	
+	SET_MODE_OF_OPERATION:
+	bTestChangeMOP := FALSE;
+		fbSetModeOfOperation(sNetId := sNetId,
+							nSlaveAddr := nSlaveAddr,
+							nSubIndex := 0,
+							nIndex := 16#6060,
+							pSrcBuf := ADR(counter),
+							cbBufLen := SIZEOF(counter),
+							bExecute := bExecuteChangeMOP);
+		tWait1(PT := T#2S, 
+			IN := bExecuteChangeMOP);
+		bExecuteChangeMOP := TRUE;				
+		IF tWait1.Q THEN
+			eStartUpState := TEST_MODE_OF_OPERATION;
+		END_IF
+
+	TEST_MODE_OF_OPERATION:
+		bExecuteChangeMOP := FALSE;	
+		fbGetModeOfOperation(sNetId := sNetId,
+							nSlaveAddr := nSlaveAddr,
+							nSubIndex := 0,
+							nIndex := 16#6061,
+							pDstBuf := ADR(modeOfOperation),
+							cbBufLen := SIZEOF(modeOfOperation),
+							bExecute := bTestChangeMOP);
+		tWait2(PT := T#2S,
+				IN := bTestChangeMOP);
+		bTestChangeMOP := TRUE; 
+		IF tWait2.Q THEN
+			IF NOT modeOfOperation = counter AND counter <> 5 THEN
+				bChangeModeOfOperation := FALSE;
+				aMOPObjects[1] := 0;
+				aMOPObjects[2] := 0;
+			END_IF
+			counter := counter + 1;
+			IF counter < 11 THEN
+				eStartUpState := SET_MODE_OF_OPERATION;
+			ELSE
+				eStartUpState := GET_TEMPERATURE;
+			END_IF
+		END_IF
+	
+	GET_TEMPERATURE:
+		fbGetDriveTemperature(sNetId := sNetId,
+							nSlaveAddr := nSlaveAddr,
+							nSubIndex := 0,
+							nIndex := 16#2200,
+							pDstBuf := ADR(nDriveTemperature),
+							cbBufLen := SIZEOF(nDriveTemperature),
+							bExecute := TRUE);
+		fbGetMotorTemperature(sNetId := sNetId,
+							nSlaveAddr := nSlaveAddr,
+							nSubIndex := 0,
+							nIndex := 16#2202,
+							pDstBuf := ADR(nMotorTemperature),
+							bExecute := TRUE);							
+		tWait(IN := TRUE,
+			PT := T#125MS);
+		IF tWait.Q THEN
+			tWait.IN := FALSE;
+		//	eStartUpState := CHECK_PLC_ERROR;
+		END_IF
+		
+		CHECK_PLC_ERROR:
+			IF fbSetModeOfOperation.bError OR fbGetModeOfOperation.bError OR
+				fbGetDriveTemperature.bError OR fbGetMotorTemperature.bError THEN
+				stPlcError.bPlcError := TRUE;
+				IF fbSetModeOfOperation.bError THEN
+					stPlcError.bErrorCode[1] := fbSetModeOfOperation.nErrId;
+					aMOPObjects[1] := 0;
+				END_IF
+				IF fbGetModeOfOperation.bError THEN
+					stPlcError.bErrorCode[2] := fbGetModeOfOperation.nErrId;
+					aMOPObjects[2] := 0;		
+				END_IF
+				IF fbGetDriveTemperature.bError THEN
+					stPlcError.bErrorCode[3] := fbGetDriveTemperature.nErrId;
+					aTemperatureObjects[1] := 0;
+				END_IF
+				IF fbGetMotorTemperature.bError THEN
+					stPlcError.bErrorCode[4] := fbGetMotorTemperature.nErrId;
+					aTemperatureObjects[2] := 0;
+				END_IF
+			END_IF
+			bFinished := TRUE;
+			eStartUpState := WAIT_FOR_TRIGGER;
+END_CASE]]></ST>
+    </Implementation>
+    <LineIds Name="StartUpTests">
+      <LineId Id="5" Count="0" />
+      <LineId Id="14" Count="0" />
+      <LineId Id="31" Count="0" />
+      <LineId Id="35" Count="0" />
+      <LineId Id="48" Count="0" />
+      <LineId Id="260" Count="1" />
+      <LineId Id="200" Count="0" />
+      <LineId Id="64" Count="0" />
+      <LineId Id="189" Count="0" />
+      <LineId Id="33" Count="1" />
+      <LineId Id="17" Count="1" />
+      <LineId Id="47" Count="0" />
+      <LineId Id="50" Count="0" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="42" Count="0" />
+      <LineId Id="198" Count="0" />
+      <LineId Id="51" Count="1" />
+      <LineId Id="326" Count="0" />
+      <LineId Id="197" Count="0" />
+      <LineId Id="43" Count="0" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="277" Count="0" />
+      <LineId Id="321" Count="0" />
+      <LineId Id="113" Count="6" />
+      <LineId Id="271" Count="2" />
+      <LineId Id="335" Count="2" />
+      <LineId Id="313" Count="0" />
+      <LineId Id="312" Count="0" />
+      <LineId Id="318" Count="0" />
+      <LineId Id="120" Count="5" />
+      <LineId Id="87" Count="0" />
+      <LineId Id="268" Count="0" />
+      <LineId Id="265" Count="0" />
+      <LineId Id="320" Count="0" />
+      <LineId Id="99" Count="0" />
+      <LineId Id="102" Count="0" />
+      <LineId Id="317" Count="0" />
+      <LineId Id="327" Count="1" />
+      <LineId Id="104" Count="0" />
+      <LineId Id="276" Count="0" />
+      <LineId Id="263" Count="1" />
+      <LineId Id="315" Count="1" />
+      <LineId Id="262" Count="0" />
+      <LineId Id="101" Count="0" />
+      <LineId Id="88" Count="0" />
+      <LineId Id="130" Count="0" />
+      <LineId Id="129" Count="0" />
+      <LineId Id="136" Count="8" />
+      <LineId Id="146" Count="2" />
+      <LineId Id="89" Count="0" />
+      <LineId Id="153" Count="1" />
+      <LineId Id="157" Count="1" />
+      <LineId Id="156" Count="0" />
+      <LineId Id="203" Count="2" />
+      <LineId Id="208" Count="0" />
+      <LineId Id="210" Count="1" />
+      <LineId Id="214" Count="0" />
+      <LineId Id="330" Count="0" />
+      <LineId Id="215" Count="0" />
+      <LineId Id="218" Count="0" />
+      <LineId Id="216" Count="0" />
+      <LineId Id="332" Count="0" />
+      <LineId Id="213" Count="0" />
+      <LineId Id="219" Count="1" />
+      <LineId Id="333" Count="0" />
+      <LineId Id="221" Count="2" />
+      <LineId Id="334" Count="0" />
+      <LineId Id="224" Count="0" />
+      <LineId Id="209" Count="0" />
+      <LineId Id="206" Count="1" />
+      <LineId Id="15" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

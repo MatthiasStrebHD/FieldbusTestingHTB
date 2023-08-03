@@ -1,0 +1,70 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.11">
+  <POU Name="MAIN" Id="{adcae204-ece0-4dbd-83bc-e75c85ce708f}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM MAIN
+VAR_INPUT
+	Controlword AT%Q*		: UINT;	
+	TargetPosition AT%Q*	: DINT;
+END_VAR
+VAR_OUTPUT
+	Statusword AT%I*		: UINT;
+END_VAR
+VAR
+	bStartUpTest			: BOOL;
+END_VAR	
+
+VAR
+	aTemperatureObjects		: ARRAY[1..2] OF INT := [1,1]; 	//0x2200, 0x2202
+	aMOPObjects				: ARRAY[1..2] OF INT := [1,1]; 	//0x6060, 0x6061
+	aControlStatusWords		: ARRAY[1..2] OF INT := [1,1]; 	//0x6040, 0x6041
+	bTargetPosition			: BOOL;							//0x607A
+	
+	fbSetToPPMode			: FB_EcCoeSdoWrite;
+	bSetToPPMode			: BOOL;
+	tSetToPPMode			: TON;
+	nModeOfOperation		: UDINT := 1;
+END_VAR
+
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[//StartUpTests(bTrigger := bStartUpTest,
+//	aTemperatureObjects := aTemperatureObjects,
+//	aControlStatusWords := aControlStatusWords,
+//	aMOPObjects := aMOPObjects,
+//	sNetID := GVL.sNetId,
+//	nSlaveAddr := GVL.nSlaveAddr);
+
+fbSetToPPMode(sNetId := GVL.sNetId, 
+				nSlaveAddr := GVL.nSlaveAddr,
+				nIndex := 16#6060,
+				pSrcBuf := ADR(nModeOfOperation),
+				cbBufLen := SIZEOF (nModeOfOperation),
+				bExecute := bSetToPPMode);
+tSetToPPMode(IN := bSetToPPMode,
+				PT := T#250MS);
+bSetToPPMode := TRUE;
+IF tSetToPPMode.Q THEN
+	P_ProfilePositionModeTest();	
+END_IF
+
+				]]></ST>
+    </Implementation>
+    <LineIds Name="MAIN">
+      <LineId Id="2" Count="0" />
+      <LineId Id="17" Count="1" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="9" Count="1" />
+      <LineId Id="59" Count="0" />
+      <LineId Id="33" Count="0" />
+      <LineId Id="60" Count="0" />
+      <LineId Id="62" Count="1" />
+      <LineId Id="65" Count="1" />
+      <LineId Id="70" Count="0" />
+      <LineId Id="72" Count="0" />
+      <LineId Id="68" Count="1" />
+      <LineId Id="75" Count="1" />
+      <LineId Id="104" Count="0" />
+      <LineId Id="61" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

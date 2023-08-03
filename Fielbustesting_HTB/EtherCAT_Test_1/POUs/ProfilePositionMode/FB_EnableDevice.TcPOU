@@ -1,0 +1,149 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.11">
+  <POU Name="FB_EnableDevice" Id="{a410285a-0c2f-47a6-bfb6-f23d8e315db6}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_EnableDevice 
+VAR_IN_OUT
+	bTrigger			: BOOL;
+END_VAR
+VAR_INPUT
+	sNetID				: T_AmsNetId;
+	nSlaveAddr			: UINT;
+END_VAR
+VAR_OUTPUT
+	bFinished			: BOOL;
+	bSuccess			: BOOL;
+END_VAR
+VAR
+	eState				: (WAIT_FOR_TRIGGER, SHUTDOWN, SWITCH_ON);
+	tWait1				: TON;
+	tWait2				: TON;
+	fbGetStatusword		: FB_EcCoeSdoRead;
+	nStatusword			: UINT;
+	bGetStatusword		: BOOL;
+	bExecuteTimer		: BOOL;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[CASE eState OF
+	WAIT_FOR_TRIGGER:
+		IF bTrigger THEN
+			bExecuteTimer	:= FALSE;
+			bSuccess := TRUE;
+			bFinished := FALSE;
+			bTrigger := FALSE;
+			eState := SHUTDOWN;
+		END_IF
+	
+	SHUTDOWN:
+		MAIN.Controlword.0 := 0;
+		MAIN.Controlword.1 := 1;
+		MAIN.Controlword.2 := 1;
+		MAIN.Controlword.7 := 0;
+
+		tWait1(PT := T#125MS,
+			IN := bExecuteTimer);
+			bExecuteTimer := TRUE;
+		IF tWait1.Q THEN
+			bExecuteTimer := FALSE;
+			tWait2(IN := bGetStatusword,
+				PT := T#250MS);
+			fbGetStatusword(sNetId := sNetId,
+				nSlaveAddr := nSlaveAddr,
+				nIndex := 16#6041,
+				nSubIndex := 0,
+				pDstBuf := ADR(nStatusword),
+				cbBufLen := SIZEOF(nStatusword),
+				bExecute := bGetStatusword);
+			bGetStatusword := TRUE;
+			IF tWait2.Q THEN
+				ADSLOGSTR(msgCtrlMask := ADSLOG_MSGTYPE_HINT,
+					msgFmtStr := 'Shutdown',
+					strArg := '');
+				bExecuteTimer := FALSE;
+				IF (nStatusword.0 = 1 AND nStatusword.5) 
+					AND NOT (nStatusword.1 AND nStatusword.2 AND nStatusword.3
+						AND nStatusword.6) THEN
+ 					eState := SWITCH_ON;
+				ELSE 
+					bSuccess := FALSE;
+					bFinished := TRUE;
+					eState := WAIT_FOR_TRIGGER;
+				END_IF
+			END_IF
+		END_IF
+		
+	SWITCH_ON:
+		ADSLOGSTR(msgCtrlMask := ADSLOG_MSGTYPE_HINT,
+			msgFmtStr := 'Switch On',
+			strArg := '');
+		MAIN.Controlword.0 := 1;
+		MAIN.Controlword.1 := 1;
+		MAIN.Controlword.2 := 1;
+		Main.Controlword.3 := 1;
+		Main.Controlword.7 := 0;
+		bExecuteTimer := TRUE;
+		bGetStatusWord := TRUE;
+		IF tWait1.Q THEN
+			bExecuteTimer	:= FALSE;
+			IF tWait2.Q THEN
+				bGetStatusword := FALSE;
+				IF nStatusword.0 AND nStatusword.1 AND nStatusword.5 
+						AND NOT (nStatusword.2 AND nStatusword.3 AND nStatusword.6) THEN
+					bSuccess := FALSE;
+				END_IF
+				bFinished := TRUE;
+				eState := WAIT_FOR_TRIGGER;
+			END_IF
+		END_IF
+END_CASE]]></ST>
+    </Implementation>
+    <LineIds Name="FB_EnableDevice">
+      <LineId Id="19" Count="0" />
+      <LineId Id="74" Count="1" />
+      <LineId Id="136" Count="0" />
+      <LineId Id="81" Count="0" />
+      <LineId Id="83" Count="2" />
+      <LineId Id="82" Count="0" />
+      <LineId Id="76" Count="0" />
+      <LineId Id="35" Count="0" />
+      <LineId Id="38" Count="3" />
+      <LineId Id="120" Count="0" />
+      <LineId Id="44" Count="1" />
+      <LineId Id="105" Count="0" />
+      <LineId Id="47" Count="0" />
+      <LineId Id="175" Count="1" />
+      <LineId Id="171" Count="0" />
+      <LineId Id="137" Count="0" />
+      <LineId Id="145" Count="1" />
+      <LineId Id="148" Count="0" />
+      <LineId Id="151" Count="2" />
+      <LineId Id="138" Count="0" />
+      <LineId Id="158" Count="0" />
+      <LineId Id="216" Count="1" />
+      <LineId Id="215" Count="0" />
+      <LineId Id="169" Count="0" />
+      <LineId Id="162" Count="5" />
+      <LineId Id="218" Count="0" />
+      <LineId Id="168" Count="0" />
+      <LineId Id="160" Count="1" />
+      <LineId Id="56" Count="1" />
+      <LineId Id="37" Count="0" />
+      <LineId Id="210" Count="1" />
+      <LineId Id="209" Count="0" />
+      <LineId Id="42" Count="0" />
+      <LineId Id="58" Count="2" />
+      <LineId Id="102" Count="0" />
+      <LineId Id="61" Count="0" />
+      <LineId Id="173" Count="0" />
+      <LineId Id="64" Count="0" />
+      <LineId Id="172" Count="0" />
+      <LineId Id="174" Count="0" />
+      <LineId Id="183" Count="0" />
+      <LineId Id="179" Count="3" />
+      <LineId Id="184" Count="0" />
+      <LineId Id="177" Count="1" />
+      <LineId Id="66" Count="0" />
+      <LineId Id="36" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

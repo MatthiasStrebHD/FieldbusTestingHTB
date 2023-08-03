@@ -1,0 +1,342 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.11">
+  <POU Name="P_ProfilePositionModeTest" Id="{899bc5f3-4f5f-4eaa-beb6-c92d972467a4}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM P_ProfilePositionModeTest
+VAR
+	fbMoveInProfilePosition			: Motion;
+	fbGetCurrentPosition			: FB_EcCoeSdoRead;
+	fbGetStatusword					: FB_EcCoeSdoRead;
+	fbGetPositionWindow				: FB_EcCoeSdoRead;
+	fbGetPositionDemandValue		: FB_EcCoeSdoRead;
+	tWaitForCurrentPosition			: TON;
+	tWaitForPositionDemandValue		: TON;
+	tGetStatusword					: TON;
+	bGetCurrentPosition				: BOOL;
+	bMove							: BOOL; 
+	bExecuteTimer					: BOOL;
+	bGetStatusword					: BOOL;
+	bGetParameters					: BOOL;
+	bSetPositioningOptionCode		: BOOL;
+	bGetPositionDemandValue			: BOOL;
+	bBasicOperationAbsStarted		: BOOL;
+	bBasicOperationAbsFinished		: BOOL := FALSE;
+	bPositioningOptionCodeSet		: BOOL;
+	bTargetReached					: BOOL;
+	bTestAbsolutePositioning		: BOOL;
+	nTargetPosition					: DINT;
+	nCurrentPosition				: DINT;
+	nTargetPositionBuf				: DINT;
+	nPositionDemandValue			: DINT;
+	nStatusword						: UINT;
+	nPositionWindow					: UDINT;
+	
+	
+	bTest							: BOOL;
+	bAusprobieren					: BOOL;
+END_VAR
+
+VAR
+	bBasicOperationAbs				: BOOL;
+	bBasicOperationRel				: BOOL;
+	bPositioningOptionCode			: BOOL;
+END_VAR
+
+//For Test Set of Setpoints
+VAR
+	bSetOfSetpointFinished 			: BOOL;
+	nCurrentPositionBuf				: DINT;
+	bSetPointSet					: BOOL;  //For both
+	bSetOfSetpoints					: BOOL;
+	bStartBasicOperationAbs			: BOOL;
+	bTestSetOfSetpoints				: BOOL;
+	bSetOfSetpointsFinished			: BOOL;
+END_VAR
+
+//Fo Test Change Immediately
+VAR
+	bTestChangeImmediately			: BOOL;
+	bChangeImmediatelyFinished		: BOOL;
+	bChangeImmediately				: BOOL;
+END_VAR
+
+//For test of relative Positioninig
+VAR
+	tSetPositioningOptionCode		: TON;
+	fbSetPositioningOptionCode		: FB_EcCoeSdoWrite;
+	bTestRelativePositioning		: BOOL;
+	bRelativePositioningFinished	: BOOL;
+	nPositioningOptionCode			: DINT;
+	nCounter						: DINT;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[tWaitForCurrentPosition(IN := bGetCurrentPosition,
+							PT := T#10MS);
+tGetStatusword(IN := bGetStatusword,
+					PT := T#500MS);	
+tSetPositioningOptionCode(IN := bSetPositioningOptionCode,
+							PT := T#125MS);		
+tWaitForPositionDemandValue(IN := bGetPositionDemandValue,
+							PT := T#125MS);
+IF tWaitForCurrentPosition.Q THEN
+	bGetCurrentPosition := FALSE;
+ELSE
+	bGetCurrentPosition := TRUE;		
+END_IF
+fbMoveInProfilePosition(sNetID := GVL.sNetId,
+						nSlaveAddr := GVL.nSlaveAddr,
+						nTargetPosition := nTargetPosition,
+						bMove := bMove);
+fbGetStatusword(sNetId := GVL.sNetId,
+				nSlaveAddr := GVL.nSlaveAddr,
+				nIndex := 16#6041,
+				nSubindex := 0,
+				pDstBuf := ADR(nStatusWord),
+				cbBufLen := SIZEOF(nStatusWord),
+				bExecute := bGetStatusword);
+fbGetCurrentPosition(sNetId := GVL.sNetId,
+						nSlaveAddr := GVL.nSlaveAddr,
+						nIndex := 16#6064,
+						nSubIndex := 0,
+						pDstBuf := ADR(nCurrentPosition),
+						cbBufLen := SIZEOF(nCurrentPosition),
+						bExecute := bGetCurrentPosition);
+fbGetPositionWindow(sNetId := GVL.sNetId,
+					nSlaveAddr := GVL.nSlaveAddr,
+					nIndex := 16#6067,
+					nSubIndex := 0,
+					pDstBuf := ADR(nPositionWindow),
+					cbBufLen := SIZEOF(nPositionWindow),
+					bExecute := bGetParameters);
+fbGetPositionDemandValue(sNetId := GVL.sNetId,
+							nSlaveAddr := GVL.nSlaveAddr,
+							nIndex := 16#60FC,
+							nSubIndex := 0,
+							pDstBuf := ADR(nPositionDemandValue),
+							cbBufLen := SIZEOF(nPositionDemandValue),
+							bExecute := bGetPositionDemandValue);
+fbSetPositioningOptionCode(sNetId := GVL.sNetId,
+							nSlaveAddr := GVL.nSlaveAddr,
+							nIndex := 16#60F2,
+							nSubindex := 0,
+							pSrcBuf := ADR(nPositioningOptionCode),
+							cbBufLen := SIZEOF(nPositioningOptionCode),
+							bExecute := bSetPositioningOptionCode);
+bGetParameters := TRUE;
+
+IF bStartBasicOperationAbs THEN					
+	//Basic Operation
+	//Set-point is applied to the device
+	//Move to absolute position is tested
+	//Wait until Target reach Bit is set
+	//Control if position is within error window
+	
+	//Target shall be an absolute value
+	MAIN.Controlword.6 := 0;
+
+	//Operation has not yet started and we are sure that initial position is obtained
+	IF NOT bBasicOperationAbsStarted THEN
+		nTargetPosition := nCurrentPosition + 5000000;
+		//Start absolute positioning
+		bMove := TRUE;	
+		bBasicOperationAbsStarted := TRUE;
+	END_IF
+					
+	//Target reached?
+	bGetStatusword := TRUE;
+	IF tGetStatusword.Q THEN
+		IF NOT nStatusword.10 THEN
+			bGetStatusword := FALSE;
+		ELSIF ((nCurrentPosition >= nTargetPosition - nPositionWindow)
+				AND (nCurrentPosition <= nTargetPosition + nPositionWindow)) 
+				AND fbMoveInProfilePosition.bStartPositioning THEN
+			//absolute Positionining
+			bBasicOperationAbs := TRUE;
+			bBasicOperationAbsFinished := TRUE;
+			bStartBasicOperationAbs := FALSE;
+		ELSIF fbMoveInProfilePosition.bStartPositioning THEN
+			bBasicOperationAbs := FALSE;
+			bBasicOperationAbsFinished := TRUE;
+			bStartBasicOperationAbs := FALSE;
+		END_IF
+		bGetStatusword := FALSE;
+	END_IF
+END_IF
+
+//Test SetOfSetpoints
+IF bTestSetOfSetpoints AND bBasicOperationAbsFinished AND NOT bSetOfSetpointsFinished THEN
+	IF NOT bSetPointSet THEN
+		MAIN.Controlword.5 := 0;
+		nTargetPosition := nCurrentPosition + 100000000;
+		nTargetPositionBuf := nTargetPosition;
+		nCurrentPositionBuf := nCurrentPosition + 10000000/2;
+		bSetPointSet := TRUE;
+	END_IF
+	IF (nCurrentPosition > nCurrentPositionBuf) AND bSetPointSet THEN
+		nTargetPosition := nCurrentPositionBuf - 10000000/2;
+	END_IF
+	bSetOfSetpoints := TestChangeOfSetpoints(bActive => bSetOfSetpointsFinished);
+	IF bSetOfSetpointsFinished THEN
+		bSetPointSet := FALSE;
+	END_IF
+END_IF
+
+//Change Immediately
+IF bTestChangeImmediately AND bSetOfSetpointsFinished AND NOT bChangeImmediatelyFinished THEN
+	IF NOT bSetPointSet THEN
+		MAIN.Controlword.5 := 1;
+		nTargetPosition := nCurrentPosition + 100000000;
+		nTargetPositionBuf := nTargetPosition;
+		nCurrentPositionBuf := nCurrentPosition + 10000000/2;
+		bSetPointSet := TRUE;
+	END_IF
+	IF (nCurrentPosition > nCurrentPositionBuf) AND bSetPointSet THEN
+		nTargetPosition := nCurrentPositionBuf - 10000000/2;
+	END_IF
+	bChangeImmediately := NOT TestChangeOfSetpoints(bActive => bChangeImmediatelyFinished);
+END_IF
+
+//Test relative positioning:
+//Bit 6 of Controlword is set to 1
+
+IF bTestRelativePositioning THEN
+	MAIN.Controlword.6 := 1;
+	//positioning option code: 0
+	//Positioning moves shall be performed relative to the preciding
+	//target position
+	IF nCounter = 0 THEN
+		nPositioningOptionCode := 0;
+		IF tSetPositioningOptionCode.Q THEN
+			nTargetPosition := 5000000;
+		END_IF
+		
+		nCounter := nCounter + 1;
+	END_IF
+
+	//positioning option code: 2#0001
+	//Positioning moves shall be performed relative to the actual
+	//positioning demand value (16#60FC)
+	
+	//positioning option code : 2#0010
+	//Positioning moves shall be performed relative to the position
+	//actual value (16#6064)
+END_IF]]></ST>
+    </Implementation>
+    <Method Name="TestChangeOfSetpoints" Id="{15b5872a-9abe-416f-a38b-72ef3f958d08}">
+      <Declaration><![CDATA[METHOD TestChangeOfSetpoints : BOOL
+VAR_OUTPUT
+	bActive		: BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF ((nCurrentPosition >= nTargetPositionBuf - nPositionWindow)
+	AND (nCurrentPosition <= nTargetPositionBuf + nPositionWindow)) THEN
+	bActive := TRUE;
+	bSetOfSetPointsFinished := TRUE;
+ELSIF ((nCurrentPosition >= nTargetPosition - nPositionWindow)
+	AND (nCurrentPosition <= nTargetPosition + nPositionWindow)) THEN
+	TestChangeOfSetpoints := FALSE;
+	bActive := TRUE;
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <LineIds Name="P_ProfilePositionModeTest">
+      <LineId Id="93" Count="0" />
+      <LineId Id="92" Count="0" />
+      <LineId Id="91" Count="0" />
+      <LineId Id="94" Count="0" />
+      <LineId Id="229" Count="1" />
+      <LineId Id="347" Count="1" />
+      <LineId Id="211" Count="0" />
+      <LineId Id="210" Count="0" />
+      <LineId Id="213" Count="1" />
+      <LineId Id="208" Count="0" />
+      <LineId Id="416" Count="2" />
+      <LineId Id="415" Count="0" />
+      <LineId Id="114" Count="5" />
+      <LineId Id="113" Count="0" />
+      <LineId Id="121" Count="5" />
+      <LineId Id="120" Count="0" />
+      <LineId Id="133" Count="3" />
+      <LineId Id="139" Count="2" />
+      <LineId Id="337" Count="3" />
+      <LineId Id="343" Count="2" />
+      <LineId Id="232" Count="2" />
+      <LineId Id="238" Count="0" />
+      <LineId Id="235" Count="2" />
+      <LineId Id="142" Count="0" />
+      <LineId Id="173" Count="0" />
+      <LineId Id="137" Count="0" />
+      <LineId Id="5" Count="1" />
+      <LineId Id="8" Count="0" />
+      <LineId Id="25" Count="0" />
+      <LineId Id="35" Count="0" />
+      <LineId Id="645" Count="0" />
+      <LineId Id="647" Count="0" />
+      <LineId Id="646" Count="0" />
+      <LineId Id="186" Count="0" />
+      <LineId Id="215" Count="0" />
+      <LineId Id="64" Count="0" />
+      <LineId Id="67" Count="0" />
+      <LineId Id="183" Count="0" />
+      <LineId Id="185" Count="0" />
+      <LineId Id="179" Count="0" />
+      <LineId Id="66" Count="0" />
+      <LineId Id="46" Count="0" />
+      <LineId Id="75" Count="0" />
+      <LineId Id="332" Count="0" />
+      <LineId Id="95" Count="0" />
+      <LineId Id="525" Count="7" />
+      <LineId Id="578" Count="0" />
+      <LineId Id="533" Count="2" />
+      <LineId Id="577" Count="0" />
+      <LineId Id="536" Count="0" />
+      <LineId Id="333" Count="0" />
+      <LineId Id="146" Count="0" />
+      <LineId Id="199" Count="0" />
+      <LineId Id="523" Count="0" />
+      <LineId Id="522" Count="0" />
+      <LineId Id="580" Count="0" />
+      <LineId Id="203" Count="0" />
+      <LineId Id="546" Count="0" />
+      <LineId Id="544" Count="0" />
+      <LineId Id="566" Count="0" />
+      <LineId Id="550" Count="0" />
+      <LineId Id="552" Count="0" />
+      <LineId Id="543" Count="0" />
+      <LineId Id="568" Count="0" />
+      <LineId Id="604" Count="0" />
+      <LineId Id="612" Count="1" />
+      <LineId Id="628" Count="2" />
+      <LineId Id="583" Count="0" />
+      <LineId Id="585" Count="0" />
+      <LineId Id="584" Count="0" />
+      <LineId Id="617" Count="0" />
+      <LineId Id="631" Count="5" />
+      <LineId Id="624" Count="0" />
+      <LineId Id="638" Count="1" />
+      <LineId Id="637" Count="0" />
+      <LineId Id="640" Count="0" />
+      <LineId Id="625" Count="0" />
+      <LineId Id="643" Count="0" />
+      <LineId Id="642" Count="0" />
+      <LineId Id="644" Count="0" />
+      <LineId Id="650" Count="0" />
+      <LineId Id="649" Count="0" />
+      <LineId Id="657" Count="0" />
+      <LineId Id="671" Count="0" />
+      <LineId Id="660" Count="1" />
+      <LineId Id="677" Count="1" />
+      <LineId Id="681" Count="0" />
+      <LineId Id="685" Count="1" />
+      <LineId Id="682" Count="0" />
+      <LineId Id="680" Count="0" />
+      <LineId Id="679" Count="0" />
+      <LineId Id="662" Count="7" />
+      <LineId Id="658" Count="0" />
+    </LineIds>
+    <LineIds Name="P_ProfilePositionModeTest.TestChangeOfSetpoints">
+      <LineId Id="6" Count="7" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>
