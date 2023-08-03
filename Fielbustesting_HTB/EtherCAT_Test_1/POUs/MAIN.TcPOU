@@ -51,7 +51,8 @@ END_IF
 
 
 
-//Hallo Julian]]></ST>
+//Hallo Julian
+// das ist nur eine neue Änderung]]></ST>
     </Implementation>
     <LineIds Name="MAIN">
       <LineId Id="2" Count="0" />
@@ -71,6 +72,7 @@ END_IF
       <LineId Id="61" Count="0" />
       <LineId Id="132" Count="2" />
       <LineId Id="131" Count="0" />
+      <LineId Id="159" Count="0" />
     </LineIds>
   </POU>
 </TcPlcObject>
